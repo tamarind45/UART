@@ -27,6 +27,37 @@ module receiver (
 
 //*******************Declaration*******************//
 
+// FSM state wires (00: START, 01: DATA, 10: PARITY, 11: STOP)
+  wire q1, q0;
+  wire q1_next, q0_next;
+  wire fsm_en;
+
+  // Counter outputs
+  wire [3:0] tick_counter;
+  wire [2:0] bit_counter;
+
+  // Threshold & condition flags
+  wire start_full;
+  wire tick_full;
+  wire d_full;
+  wire stop_full;
+  wire par_en;
+  wire step_bit;
+
+  // Datapath & control wires
+  wire [7:0] shift_data;
+  wire       tick_clr, tick_en;
+  wire       bit_clr, bit_en;
+  wire       shift_clr, shift_en;
+
+  // Error & done flag next-state wires
+  wire par_err_next;
+  wire frame_err_next;
+  wire overrun_err_next;
+  wire rx_done_next;
+
+  assign q1_next = (~q1 & q0 & d_full) | (q1 & ~q0) | (q1 & q0 & ~stop_full);
+  assign q0_next = (q1 | q0 | ~i_rx) & (q1 | ~q0 | ~(^i_par_mode) | ~d_full) & (~q1 | q0 | i_tick) & (~q1 | ~q0 | ~stop_full);
 //*************************************************//
 
 //*******************Combinational Logic*************//
@@ -38,6 +69,10 @@ module receiver (
 //*************************************************//
 
 //*******************Module**************************//
+
+counter_16b u_tick_cnt  (.i_clk(i_clk), .i_rst(i_rst), .i_clr(tick_clr),  .i_en(tick_en),  .o_cnt(tick_counter));
+counter_3b  u_bit_cnt   (.i_clk(i_clk), .i_rst(i_rst), .i_clr(bit_clr),   .i_en(bit_en),   .o_cnt(bit_counter));
+shift_reg   u_shift_reg (.i_clk(i_clk), .i_rst(i_rst), .i_clr(shift_clr), .i_en(shift_en), .i_rx(i_rx), .o_data(shift_data));
 
 //*************************************************//
 
