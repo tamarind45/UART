@@ -34,15 +34,13 @@ module receiver (
 
   // Counter outputs
   wire [3:0] tick_counter;
-  wire [2:0] bit_counter;
+  wire [2:0] bit_counter;	
 
   // Threshold & condition flags
   wire start_full;
   wire tick_full;
   wire d_full;
   wire stop_full;
-  wire par_en;
-  wire step_bit;
 
   // Datapath & control wires
   wire [7:0] shift_data;
@@ -58,6 +56,11 @@ module receiver (
 
   assign q1_next = (~q1 & q0 & d_full) | (q1 & ~q0) | (q1 & q0 & ~stop_full);
   assign q0_next = (q1 | q0 | ~i_rx) & (q1 | ~q0 | ~(^i_par_mode) | ~d_full) & (~q1 | q0 | i_tick) & (~q1 | ~q0 | ~stop_full);
+	assign start_full = ~|(tick_counter ^ 4'b0111);
+  assign tick_full  = &tick_counter;
+  assign d_full     = bit_counter[2] & bit_counter[1] & ~(bit_counter[0] ^ i_dbit_sel);
+  assign stop_full  = ~bit_counter[2] & ~bit_counter[1] & ~(bit_counter[0] ^ i_stop_sel);
+	
 //*************************************************//
 
 //*******************Combinational Logic*************//
@@ -70,9 +73,10 @@ module receiver (
 
 //*******************Module**************************//
 
-counter_16b u_tick_cnt  (.i_clk(i_clk), .i_rst(i_rst), .i_clr(tick_clr),  .i_en(tick_en),  .o_cnt(tick_counter));
-counter_3b  u_bit_cnt   (.i_clk(i_clk), .i_rst(i_rst), .i_clr(bit_clr),   .i_en(bit_en),   .o_cnt(bit_counter));
-shift_reg   u_shift_reg (.i_clk(i_clk), .i_rst(i_rst), .i_clr(shift_clr), .i_en(shift_en), .i_rx(i_rx), .o_data(shift_data));
+  counter_16b u_tick_cnt  (.i_clk(i_clk), .i_rst(i_rst), .i_clr(tick_clr),  .i_en(tick_en),  .o_cnt(tick_counter));
+  counter_3b  u_bit_cnt   (.i_clk(i_clk), .i_rst(i_rst), .i_clr(bit_clr),   .i_en(bit_en),   .o_cnt(bit_counter));
+  shift_reg   u_shift_reg (.i_clk(i_clk), .i_rst(i_rst), .i_clr(shift_clr), .i_en(shift_en), .i_rx(i_rx), .o_data(shift_data));
+  d_ff #(.WIDTH(2)) u_fsm_state (.i_clk(i_clk), .i_rst(i_rst), .i_clr(1'b0), .i_en(fsm_en), .i_d({q1_next, q0_next}), .o_q({q1, q0}));
 
 //*************************************************//
 
