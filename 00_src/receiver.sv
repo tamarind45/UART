@@ -54,6 +54,12 @@ module receiver (
   wire overrun_err_next;
   wire rx_done_next;
 
+  // Error & done flag control wires
+  wire start_new_frame;
+  wire par_err_en;
+  wire frame_err_en;
+  wire rx_done_en;
+
   assign q1_next = (~q1 & q0 & d_full) | (q1 & ~q0) | (q1 & q0 & ~stop_full);
   assign q0_next = (q1 | q0 | ~i_rx) & (q1 | ~q0 | ~(^i_par_mode) | ~d_full) & (~q1 | q0 | i_tick) & (~q1 | ~q0 | ~stop_full);
 	assign start_full = ~|(tick_counter ^ 4'b0111);
@@ -61,6 +67,30 @@ module receiver (
   assign d_full     = bit_counter[2] & bit_counter[1] & ~(bit_counter[0] ^ i_dbit_sel);
   assign stop_full  = ~bit_counter[2] & ~bit_counter[1] & ~(bit_counter[0] ^ i_stop_sel);
 	
+  assign tick_clr = (~q1 & ~q0) & (i_rx | (start_full & i_tick)); // reset in start state when rx = 1 or full_tick for start
+  assign tick_en = i_tick;
+
+  assign bit_clr = (~q0) | (~q1 & q0 & d_full & tick_full & i_tick) | (q1 & q0 & stop_full & tick_full & i_tick); // Xoa ve 0 khi ngoai vung DATA/STOP hoac khi dem xong du so bit DATA/STOP
+  assign bit_en  = q0 & tick_full & i_tick; // Chi cho phep dem tang len khi dang o trang thai DATA hoac STOP va da du 16 ticks
+
+  assign shift_clr = ~q1 & ~q0; // Xoa du lieu thanh ghi dich ve 0 khi o trang thai START de chuan bi cho khung moi
+  assign shift_en  = ~q1 & q0 & tick_full & i_tick; // Chi cho phep dich bit moi vao khi dang o DATA va du 16 ticks
+
+  // Next-state logic for error and done flags
+  assign par_err_next     = (i_par_mode[0] & ~^{i_rx, o_dout}) | (i_par_mode[1] & ^{i_rx, o_dout}); // Loi parity: i_par_mode=01 (Odd) loi khi tong bit 1 chan; i_par_mode=10 (Even) loi khi tong bit 1 le (xet ca bit parity i_rx va o_dout)
+  assign frame_err_next   = o_frame_err | ~i_rx; // Loi khung truyen: bat muc 1 neu bit Stop (tai giua bit) bang 0; giu lai loi neu bit Stop 1 sai khi dung che do 2 stop bits
+  assign overrun_err_next = o_rx_done; // Loi tran du lieu: frame moi da nhan xong nhung co o_rx_done cua frame cu van dang bang 1 (chua duoc doc)
+  assign overrun_err_next = i_fifo_full; // Loi tran du lieu: frame moi da nhan xong (cuoi STOP) nhung RX FIFO ben ngoai dang day (i_fifo_full = 1); // Bat co bao hoan tat nhan 1 frame khi chot o cuoi trang thai STOP
+
+  // Enable and clear conditions for output flag registers
+  assign start_new_frame  = (~q1 & ~q0) & (~i_rx & start_full & i_tick); // Xung xac nhan bat dau frame moi (het nua bit Start) de xoa sach cac co loi cu
+  assign par_err_en       = ( q1 & ~q0) & (tick_full & i_tick); // Chot co parity error tai diem giua bit o trang thai PARITY
+  assign frame_err_en     = ( q1 &  q0) & (tick_full & i_tick); // Chot co frame error tai diem giua moi bit Stop o trang thai STOP
+  assign rx_done_en       = ( q1 &  q0) & (stop_full & tick_full & i_tick); // Chot o_rx_done va o_overrun_err tai thoi diem ket thuc bit Stop cuoi cung
+
+  assign o_dout = i_dbit_sel ? shift_data : {1'b0, shift_data[7:1]}; // Chon 8-bit (shift_data) hoac 7-bit (dem 0 vao MSB)
+  assign rx_done_en = (q1 & q0) & (stop_full & tick_full & i_tick); // Xung bao nhan xong 1 frame o cuoi bit Stop cuoi cung
+
 //*************************************************//
 
 //*******************Combinational Logic*************//
@@ -77,6 +107,11 @@ module receiver (
   counter_3b  u_bit_cnt   (.i_clk(i_clk), .i_rst(i_rst), .i_clr(bit_clr),   .i_en(bit_en),   .o_cnt(bit_counter));
   shift_reg   u_shift_reg (.i_clk(i_clk), .i_rst(i_rst), .i_clr(shift_clr), .i_en(shift_en), .i_rx(i_rx), .o_data(shift_data));
   d_ff #(.WIDTH(2)) u_fsm_state (.i_clk(i_clk), .i_rst(i_rst), .i_clr(1'b0), .i_en(fsm_en), .i_d({q1_next, q0_next}), .o_q({q1, q0}));
+  // Output status & error flag registers
+  d_ff #(.WIDTH(1)) u_par_err_ff     (.i_clk(i_clk), .i_rst(i_rst), .i_clr(start_new_frame), .i_en(par_err_en),   .i_d(par_err_next),     .o_q(o_parity_err));
+  d_ff #(.WIDTH(1)) u_frame_err_ff   (.i_clk(i_clk), .i_rst(i_rst), .i_clr(start_new_frame), .i_en(frame_err_en), .i_d(frame_err_next),   .o_q(o_frame_err));
+  d_ff #(.WIDTH(1)) u_overrun_err_ff (.i_clk(i_clk), .i_rst(i_rst), .i_clr(start_new_frame), .i_en(rx_done_en),   .i_d(overrun_err_next), .o_q(o_overrun_err));
+  d_ff #(.WIDTH(1)) u_rx_done_ff (.i_clk(i_clk), .i_rst(i_rst), .i_clr(1'b0), .i_en(1'b1), .i_d(rx_done_en), .o_q(o_rx_done));
 
 //*************************************************//
 
