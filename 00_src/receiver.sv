@@ -25,6 +25,50 @@ module receiver (
   output logic       o_overrun_err
 );
 
+// ============================================================================
+// NOTE: FSM cua RECEIVER (4 trang thai, ma hoa nhi phan 2 bit {q1,q0})
+// ----------------------------------------------------------------------------
+//   Trang thai | q1 q0 | Y nghia
+//   START      | 0  0  | cho start bit (gop IDLE + START): cho rx xuong 0, roi dem 8 tick toi giua bit start
+//   DATA       | 0  1  | nhan bit data, moi 16 tick lay mau 1 bit tai giua bit
+//   PARITY     | 1  0  | lay mau bit parity tai giua bit (chi di qua khi par_en = 1)
+//   STOP       | 1  1  | lay mau bit stop tai giua bit (1 hoac 2 bit theo i_sbit_sel)
+//
+// Dieu kien cap nhat trang thai (fsm_en): chi doi trang thai dung luc can lay mau
+//   fsm_en = i_tick & ( (START & start_full) | ((DATA|PARITY|STOP) & tick_full) )
+//     start_full = tick_counter == 7   (dem du 8 tick = nua bit start)
+//     tick_full  = tick_counter == 15  (dem du 16 tick = 1 bit)
+//
+// Bang chuyen trang thai (xet tai thoi diem fsm_en = 1):
+//   Hien tai | Dieu kien                  | Ke tiep | Viec lam kem theo
+//   START    | start_det = 0              | START   | (rx da len 1 lai: nhieu, bo qua)
+//   START    | start_det = 1              | DATA    | start_new_frame: xoa 3 co loi, xoa tick_counter
+//   DATA     | d_full = 0                 | DATA    | shift_en: dich bit rx_sync vao; bit_counter + 1
+//   DATA     | d_full = 1 & par_en = 1    | PARITY  | dich bit cuoi; bit_counter ve 0
+//   DATA     | d_full = 1 & par_en = 0    | STOP    | dich bit cuoi; bit_counter ve 0
+//   PARITY   | -                          | STOP    | chot o_parity_err (par_err_en)
+//   STOP     | stop_full = 0              | STOP    | chot o_frame_err; bit_counter + 1 (che do 2 stop)
+//   STOP     | stop_full = 1              | START   | chot o_frame_err + o_overrun_err; o_rx_done_tick; bit_counter ve 0
+//
+// Cac tin hieu dieu kien:
+//   start_det = ~rx_sync & armed    (armed = rx da len 1 it nhat 1 lan sau frame truoc; chong break / stop sai)
+//   par_en    = ^i_par_mode         (01 even hoac 10 odd -> co parity; 00 khong co)
+//   d_full    = bit_counter == 7 (8 bit data) hoac == 6 (7 bit data)    -> dang lay mau bit data cuoi
+//   stop_full = bit_counter == 0 (1 stop) hoac == 1 (2 stop)           -> dang lay mau bit stop cuoi
+//
+// Phuong trinh trang thai ke tiep (khi fsm_en = 1):
+//   q1_next = (~q1 & q0 & d_full) | (q1 & ~q0) | (q1 & q0 & ~stop_full)
+//   q0_next = (q1 | q0 | start_det) & (q1 | ~q0 | ~par_en | ~d_full)
+//           & (~q1 | q0 | i_tick)   & (~q1 | ~q0 | ~stop_full)
+//
+// Bo dem tick (tick_counter, 4 bit):
+//   - o state START: giu o 0 khi ~start_det; dem tick khi start_det = 1; xoa khi start_full & i_tick
+//   - o cac state con lai: chay tu do, quay vong 0..15 (16 tick = 1 bit), moi tick_full la 1 diem lay mau
+// Bo dem bit (bit_counter, 3 bit): dem bit data va bit stop; ve 0 o START, PARITY va khi ket thuc DATA/STOP
+//
+// Thoi diem lay mau: giua bit start (sau 8 tick), roi cach nhau 16 tick: giua tung bit data, parity, stop
+// ============================================================================
+
 //*******************Declaration*******************//
 
 // FSM state wires (00: START, 01: DATA, 10: PARITY, 11: STOP)
